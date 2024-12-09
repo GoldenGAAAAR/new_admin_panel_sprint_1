@@ -1,22 +1,209 @@
 import sqlite3
+from datetime import datetime
 
 import psycopg
 from psycopg import ClientCursor, connection as _connection
 from psycopg.rows import dict_row
+from contextlib import contextmanager
+from dotenv import load_dotenv
+from dataclasses import dataclass, field, fields
+import uuid
+import os
+
+@contextmanager
+def conn_context(db_path: str):
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+@dataclass
+class Movie:
+    title: str
+    description: str
+    rating: float = field(default=0.0)
+    file_path: str = field(default=None)
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+    type: str = field(default=None)
+    creation_date: str = field(default=None)
+    created_at: datetime = field(default=None)
+    updated_at: datetime = field(default=None)
+
+@dataclass
+class Person:
+    full_name: str
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+    created_at: datetime = field(default=None)
+    updated_at: datetime = field(default=None)
+
+@dataclass
+class Genre:
+    name: str
+    description: str
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+    created_at: datetime = field(default=None)
+    updated_at: datetime = field(default=None)
+
+@dataclass
+class PersonMovie:
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+    film_work_id: uuid.UUID = field(default_factory=uuid.uuid4)
+    person_id: uuid.UUID = field(default_factory=uuid.uuid4)
+    role: str = field(default=None)
+    created_at: datetime = field(default=None)
+
+@dataclass
+class GenreMovie:
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+    film_work_id: uuid.UUID = field(default_factory=uuid.uuid4)
+    genre_id: uuid.UUID = field(default_factory=uuid.uuid4)
+    created_at: datetime = field(default=None)
+
+class SQLiteLoader:
+    def __init__(self, connection: sqlite3.Connection):
+        self.connection = connection
+
+    def load_movies(self):
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("SELECT * FROM film_work;")
+            data = cursor.fetchall()
+            list_of_dictionaries = [dict(row) for row in data]
+            return list_of_dictionaries
+        except sqlite3.Error as e:
+            print(f"Ошибка SQLite: {e}")
+            return []
+        finally:
+            cursor.close()
+
+    def load_genres(self):
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("SELECT * FROM genre;")
+            data = cursor.fetchall()
+            list_of_dictionaries = [dict(row) for row in data]
+            return list_of_dictionaries
+        except sqlite3.Error as e:
+            print(f"Ошибка SQLite: {e}")
+            return []
+        finally:
+            cursor.close()
+
+    def load_persons(self):
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("SELECT * FROM person;")
+            data = cursor.fetchall()
+            list_of_dictionaries = [dict(row) for row in data]
+            return list_of_dictionaries
+        except sqlite3.Error as e:
+            print(f"Ошибка SQLite: {e}")
+            return []
+        finally:
+            cursor.close()
+
+    def load_persons_film_work(self):
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("SELECT * FROM person_film_work;")
+            data = cursor.fetchall()
+            list_of_dictionaries = [dict(row) for row in data]
+            return list_of_dictionaries
+        except sqlite3.Error as e:
+            print(f"Ошибка SQLite: {e}")
+            return []
+        finally:
+            cursor.close()
+
+    def load_genres_film_work(self):
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("SELECT * FROM genre_film_work;")
+            data = cursor.fetchall()
+            list_of_dictionaries = [dict(row) for row in data]
+            return list_of_dictionaries
+        except sqlite3.Error as e:
+            print(f"Ошибка SQLite: {e}")
+            return []
+        finally:
+            cursor.close()
+
+class PostgresSaver:
+    def __init__(self, connection: _connection):
+        self.connection = connection
+
+    def save_all_data(self, data, dataclass_type, table_name, column_mapping=None):
+        cursor = self.connection.cursor()
+        try:
+            column_names = [field.name for field in fields(dataclass_type)]
+            mapped_column_names = [column_mapping.get(col, col) for col in column_names]
+            mapped_column_names_str = ','.join(mapped_column_names)
+            col_count = ', '.join(['%s'] * len(column_names))
+            objects_to_insert = []
+            for item_data in data:
+                try:
+                    mapped_item_data = {column_mapping.get(k, k): v for k, v in item_data.items()}
+                    obj = dataclass_type(**mapped_item_data)
+                    objects_to_insert.append(tuple(getattr(obj, attr) for attr in column_names))
+                except (KeyError, TypeError) as e:
+                    print(f"Ошибка при обработке данных: {e}, item_data = {item_data}")
+            cursor.executemany(f"INSERT INTO {table_name} ({mapped_column_names_str}) VALUES ({col_count}) ON CONFLICT (id) DO NOTHING", objects_to_insert)
+            self.connection.commit()
+        except psycopg.Error as e:
+            self.connection.rollback()
+            print(f"Ошибка PostgreSQL: {e}")
+        finally:
+            cursor.close()
 
 
 def load_from_sqlite(connection: sqlite3.Connection, pg_conn: _connection):
-    """Основной метод загрузки данных из SQLite в Postgres"""
-    # postgres_saver = PostgresSaver(pg_conn)
-    # sqlite_loader = SQLiteLoader(connection)
+    postgres_saver = PostgresSaver(pg_conn)
+    sqlite_loader = SQLiteLoader(connection)
+    cursor = pg_conn.cursor()
+    try:
+        truncate_queries = [
+            "TRUNCATE TABLE content.film_work CASCADE",
+            "TRUNCATE TABLE content.genre CASCADE",
+            "TRUNCATE TABLE content.person CASCADE"
+        ]
+        for query in truncate_queries:
+            cursor.execute(query)
+        pg_conn.commit()
+        column_mapping = {
+            'created_at': 'created_at',
+            'updated_at': 'updated_at'
+        }
 
-    # data = sqlite_loader.load_movies()
-    # postgres_saver.save_all_data(data)
-
+        data = sqlite_loader.load_movies()
+        postgres_saver.save_all_data(data, Movie, 'content.film_work', column_mapping)
+        data = sqlite_loader.load_persons()
+        postgres_saver.save_all_data(data, Person, 'content.person', column_mapping)
+        data = sqlite_loader.load_genres()
+        postgres_saver.save_all_data(data, Genre, 'content.genre', column_mapping)
+        data = sqlite_loader.load_genres_film_work()
+        postgres_saver.save_all_data(data, GenreMovie, 'content.genre_film_work', column_mapping)
+        data = sqlite_loader.load_persons_film_work()
+        postgres_saver.save_all_data(data, PersonMovie, 'content.person_film_work', column_mapping)
+    except psycopg.Error as e:
+        pg_conn.rollback()
+        print(f"Ошибка PostgreSQL: {e}")
+    finally:
+        cursor.close()
 
 if __name__ == '__main__':
-    dsl = {'dbname': 'movies_database', 'user': 'app', 'password': '123qwe', 'host': '127.0.0.1', 'port': 5432}
-    with sqlite3.connect('db.sqlite') as sqlite_conn, psycopg.connect(
-        **dsl, row_factory=dict_row, cursor_factory=ClientCursor
-    ) as pg_conn:
+    load_dotenv()
+
+    dsl = {
+        'dbname': os.getenv('POSTGRES_DB'),
+        'user': os.getenv('POSTGRES_USER'),
+        'password': os.getenv('POSTGRES_PASSWORD'),
+        'host': os.getenv('POSTGRES_HOST'),
+        'port': os.getenv('POSTGRES_PORT'),
+    }
+
+    db_path = 'db.sqlite'
+    with conn_context(db_path) as sqlite_conn, psycopg.connect(**dsl, row_factory=dict_row, cursor_factory=ClientCursor) as pg_conn:
         load_from_sqlite(sqlite_conn, pg_conn)
+        pg_conn.close()
