@@ -10,6 +10,8 @@ from dataclasses import dataclass, field, fields
 import uuid
 import os
 
+BATCH_SIZE = 100
+
 @contextmanager
 def conn_context(db_path: str):
     conn = sqlite3.connect(db_path)
@@ -69,8 +71,12 @@ class SQLiteLoader:
         cursor = self.connection.cursor()
         try:
             cursor.execute(f"SELECT * FROM {table_name};")
-            data = cursor.fetchall()
-            list_of_dictionaries = [dict(row) for row in data]
+            list_of_dictionaries = []
+            while True:
+                chunk = cursor.fetchmany(BATCH_SIZE)
+                if not chunk:
+                    break
+                list_of_dictionaries.extend([dict(row) for row in chunk])
             return list_of_dictionaries
         except sqlite3.Error as e:
             print(f"Ошибка SQLite: {e}")
@@ -87,21 +93,27 @@ class PostgresSaver:
         try:
             column_names = [field.name for field in fields(dataclass_type)]
             column_names_str = ','.join(column_names)
-            col_count = ', '.join(['%s'] * len(column_names))
-            objects_to_insert = []
-            for item_data in data:
-                try:
-                    obj = dataclass_type(**item_data)
-                    objects_to_insert.append(tuple(getattr(obj, attr) for attr in column_names))
-                except (KeyError, TypeError) as e:
-                    print(f"Ошибка при обработке данных: {e}, item_data = {item_data}")
-            cursor.executemany(
-                f"INSERT INTO {table_name} ({column_names_str}) VALUES ({col_count}) ON CONFLICT (id) DO NOTHING",
-                objects_to_insert)
-            self.connection.commit()
+            col_count = ','.join(['%s'] * len(column_names))
+            query = f"INSERT INTO {table_name} ({column_names_str}) VALUES ({col_count}) ON CONFLICT (id) DO NOTHING"
+
+            for i in range(0, len(data), BATCH_SIZE):
+                chunk = data[i:i + BATCH_SIZE]
+                objects_to_insert = []
+                for item_data in chunk:
+                    try:
+                        obj = dataclass_type(**item_data)
+                        objects_to_insert.append(tuple(getattr(obj, attr) for attr in column_names))
+                    except (KeyError, TypeError) as e:
+                        print(f"Ошибка при обработке данных: {e}, item_data = {item_data}")
+                if objects_to_insert:
+                    cursor.executemany(query, objects_to_insert)
+                    self.connection.commit()
+
         except psycopg.Error as e:
             self.connection.rollback()
             print(f"Ошибка PostgreSQL: {e}")
+        except Exception as e:
+            print(f"Произошла неизвестная ошибка: {e}")
         finally:
             cursor.close()
 
@@ -111,13 +123,6 @@ def load_from_sqlite(connection: sqlite3.Connection, pg_conn: _connection):
     sqlite_loader = SQLiteLoader(connection)
     cursor = pg_conn.cursor()
     try:
-        truncate_queries = [
-            "TRUNCATE TABLE content.film_work CASCADE",
-            "TRUNCATE TABLE content.genre CASCADE",
-            "TRUNCATE TABLE content.person CASCADE"
-        ]
-        for query in truncate_queries:
-            cursor.execute(query)
         pg_conn.commit()
         data = sqlite_loader.load_from_sqlite('film_work')
         postgres_saver.save_all_data(data, Movie, 'content.film_work')
