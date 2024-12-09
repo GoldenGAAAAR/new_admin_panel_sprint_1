@@ -134,22 +134,22 @@ class PostgresSaver:
     def __init__(self, connection: _connection):
         self.connection = connection
 
-    def save_all_data(self, data, dataclass_type, table_name, column_mapping=None):
+    def save_all_data(self, data, dataclass_type, table_name):
         cursor = self.connection.cursor()
         try:
             column_names = [field.name for field in fields(dataclass_type)]
-            mapped_column_names = [column_mapping.get(col, col) for col in column_names]
-            mapped_column_names_str = ','.join(mapped_column_names)
+            column_names_str = ','.join(column_names)
             col_count = ', '.join(['%s'] * len(column_names))
             objects_to_insert = []
             for item_data in data:
                 try:
-                    mapped_item_data = {column_mapping.get(k, k): v for k, v in item_data.items()}
-                    obj = dataclass_type(**mapped_item_data)
+                    obj = dataclass_type(**item_data)
                     objects_to_insert.append(tuple(getattr(obj, attr) for attr in column_names))
                 except (KeyError, TypeError) as e:
                     print(f"Ошибка при обработке данных: {e}, item_data = {item_data}")
-            cursor.executemany(f"INSERT INTO {table_name} ({mapped_column_names_str}) VALUES ({col_count}) ON CONFLICT (id) DO NOTHING", objects_to_insert)
+            cursor.executemany(
+                f"INSERT INTO {table_name} ({column_names_str}) VALUES ({col_count}) ON CONFLICT (id) DO NOTHING",
+                objects_to_insert)
             self.connection.commit()
         except psycopg.Error as e:
             self.connection.rollback()
@@ -171,21 +171,16 @@ def load_from_sqlite(connection: sqlite3.Connection, pg_conn: _connection):
         for query in truncate_queries:
             cursor.execute(query)
         pg_conn.commit()
-        column_mapping = {
-            'created_at': 'created_at',
-            'updated_at': 'updated_at'
-        }
-
         data = sqlite_loader.load_movies()
-        postgres_saver.save_all_data(data, Movie, 'content.film_work', column_mapping)
+        postgres_saver.save_all_data(data, Movie, 'content.film_work')
         data = sqlite_loader.load_persons()
-        postgres_saver.save_all_data(data, Person, 'content.person', column_mapping)
+        postgres_saver.save_all_data(data, Person, 'content.person')
         data = sqlite_loader.load_genres()
-        postgres_saver.save_all_data(data, Genre, 'content.genre', column_mapping)
+        postgres_saver.save_all_data(data, Genre, 'content.genre')
         data = sqlite_loader.load_genres_film_work()
-        postgres_saver.save_all_data(data, GenreMovie, 'content.genre_film_work', column_mapping)
+        postgres_saver.save_all_data(data, GenreMovie, 'content.genre_film_work')
         data = sqlite_loader.load_persons_film_work()
-        postgres_saver.save_all_data(data, PersonMovie, 'content.person_film_work', column_mapping)
+        postgres_saver.save_all_data(data, PersonMovie, 'content.person_film_work')
     except psycopg.Error as e:
         pg_conn.rollback()
         print(f"Ошибка PostgreSQL: {e}")
