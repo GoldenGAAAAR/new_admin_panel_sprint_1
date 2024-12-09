@@ -65,62 +65,10 @@ class SQLiteLoader:
     def __init__(self, connection: sqlite3.Connection):
         self.connection = connection
 
-    def load_movies(self):
+    def load_from_sqlite(self, table_name):
         cursor = self.connection.cursor()
         try:
-            cursor.execute("SELECT * FROM film_work;")
-            data = cursor.fetchall()
-            list_of_dictionaries = [dict(row) for row in data]
-            return list_of_dictionaries
-        except sqlite3.Error as e:
-            print(f"Ошибка SQLite: {e}")
-            return []
-        finally:
-            cursor.close()
-
-    def load_genres(self):
-        cursor = self.connection.cursor()
-        try:
-            cursor.execute("SELECT * FROM genre;")
-            data = cursor.fetchall()
-            list_of_dictionaries = [dict(row) for row in data]
-            return list_of_dictionaries
-        except sqlite3.Error as e:
-            print(f"Ошибка SQLite: {e}")
-            return []
-        finally:
-            cursor.close()
-
-    def load_persons(self):
-        cursor = self.connection.cursor()
-        try:
-            cursor.execute("SELECT * FROM person;")
-            data = cursor.fetchall()
-            list_of_dictionaries = [dict(row) for row in data]
-            return list_of_dictionaries
-        except sqlite3.Error as e:
-            print(f"Ошибка SQLite: {e}")
-            return []
-        finally:
-            cursor.close()
-
-    def load_persons_film_work(self):
-        cursor = self.connection.cursor()
-        try:
-            cursor.execute("SELECT * FROM person_film_work;")
-            data = cursor.fetchall()
-            list_of_dictionaries = [dict(row) for row in data]
-            return list_of_dictionaries
-        except sqlite3.Error as e:
-            print(f"Ошибка SQLite: {e}")
-            return []
-        finally:
-            cursor.close()
-
-    def load_genres_film_work(self):
-        cursor = self.connection.cursor()
-        try:
-            cursor.execute("SELECT * FROM genre_film_work;")
+            cursor.execute(f"SELECT * FROM {table_name};")
             data = cursor.fetchall()
             list_of_dictionaries = [dict(row) for row in data]
             return list_of_dictionaries
@@ -171,15 +119,15 @@ def load_from_sqlite(connection: sqlite3.Connection, pg_conn: _connection):
         for query in truncate_queries:
             cursor.execute(query)
         pg_conn.commit()
-        data = sqlite_loader.load_movies()
+        data = sqlite_loader.load_from_sqlite('film_work')
         postgres_saver.save_all_data(data, Movie, 'content.film_work')
-        data = sqlite_loader.load_persons()
+        data = sqlite_loader.load_from_sqlite('person')
         postgres_saver.save_all_data(data, Person, 'content.person')
-        data = sqlite_loader.load_genres()
+        data = sqlite_loader.load_from_sqlite('genre')
         postgres_saver.save_all_data(data, Genre, 'content.genre')
-        data = sqlite_loader.load_genres_film_work()
+        data = sqlite_loader.load_from_sqlite('genre_film_work')
         postgres_saver.save_all_data(data, GenreMovie, 'content.genre_film_work')
-        data = sqlite_loader.load_persons_film_work()
+        data = sqlite_loader.load_from_sqlite('person_film_work')
         postgres_saver.save_all_data(data, PersonMovie, 'content.person_film_work')
     except psycopg.Error as e:
         pg_conn.rollback()
