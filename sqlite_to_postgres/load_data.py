@@ -71,18 +71,17 @@ class SQLiteLoader:
         cursor = self.connection.cursor()
         try:
             cursor.execute(f"SELECT * FROM {table_name};")
-            list_of_dictionaries = []
             while True:
-                chunk = cursor.fetchmany(BATCH_SIZE)
-                if not chunk:
+                batch = cursor.fetchmany(BATCH_SIZE)
+                if not batch:
                     break
-                list_of_dictionaries.extend([dict(row) for row in chunk])
-            return list_of_dictionaries
+                yield [dict(row) for row in batch]
         except sqlite3.Error as e:
             print(f"Ошибка SQLite: {e}")
-            return []
+            yield []
         finally:
             cursor.close()
+
 
 class PostgresSaver:
     def __init__(self, connection: _connection):
@@ -118,27 +117,26 @@ class PostgresSaver:
             cursor.close()
 
 
-def load_from_sqlite(connection: sqlite3.Connection, pg_conn: _connection):
+def load_from_sqlite(sqlite_conn: sqlite3.Connection, pg_conn: _connection):
     postgres_saver = PostgresSaver(pg_conn)
-    sqlite_loader = SQLiteLoader(connection)
-    cursor = pg_conn.cursor()
+    sqlite_loader = SQLiteLoader(sqlite_conn)
     try:
-        pg_conn.commit()
-        data = sqlite_loader.load_from_sqlite('film_work')
-        postgres_saver.save_all_data(data, Movie, 'content.film_work')
-        data = sqlite_loader.load_from_sqlite('person')
-        postgres_saver.save_all_data(data, Person, 'content.person')
-        data = sqlite_loader.load_from_sqlite('genre')
-        postgres_saver.save_all_data(data, Genre, 'content.genre')
-        data = sqlite_loader.load_from_sqlite('genre_film_work')
-        postgres_saver.save_all_data(data, GenreMovie, 'content.genre_film_work')
-        data = sqlite_loader.load_from_sqlite('person_film_work')
-        postgres_saver.save_all_data(data, PersonMovie, 'content.person_film_work')
+        for table_name, dataclass_type, pg_table_name in [
+            ('film_work', Movie, 'content.film_work'),
+            ('person', Person, 'content.person'),
+            ('genre', Genre, 'content.genre'),
+            ('genre_film_work', GenreMovie, 'content.genre_film_work'),
+            ('person_film_work', PersonMovie, 'content.person_film_work'),
+        ]:
+            for batch in sqlite_loader.load_from_sqlite(table_name):
+                postgres_saver.save_all_data(batch, dataclass_type, pg_table_name)
+                pg_conn.commit()
+
     except psycopg.Error as e:
         pg_conn.rollback()
         print(f"Ошибка PostgreSQL: {e}")
     finally:
-        cursor.close()
+        pass
 
 if __name__ == '__main__':
     load_dotenv()
